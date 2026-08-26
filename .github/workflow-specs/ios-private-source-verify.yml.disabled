@@ -52,7 +52,7 @@ jobs:
             fi
           }
           trap revoke_token EXIT
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$INSTALLATION_TOKEN" | base64)"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$INSTALLATION_TOKEN" | base64 | tr -d '\n')"
           git -c http.extraHeader="$auth_header" clone --quiet --depth 1 --single-branch --no-tags --branch "$MOBILE_REF" \
             https://github.com/hacom-holding-dx/chat-mobile-client.git "$private_root/chat-mobile-client" \
             >"$private_logs/mobile-checkout.log" 2>&1
@@ -103,6 +103,9 @@ jobs:
 
           mobile="$private_root/chat-mobile-client"
           shared="$private_root/chat-shared-types"
+          xcode_app="$(find /Applications -maxdepth 1 -type d -name 'Xcode_26*.app' -print | sort -V | tail -n 1)"
+          test -n "$xcode_app"
+          export DEVELOPER_DIR="$xcode_app/Contents/Developer"
           test -f "$mobile/package-lock.json"
           test -f "$shared/package-lock.json"
           test -f "$mobile/ios/Podfile.lock"
