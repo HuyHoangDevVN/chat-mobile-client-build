@@ -1,0 +1,157 @@
+name: iOS Private Source Unsigned Verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-private-source-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 75
+    environment: private-source-read
+    env:
+      MOBILE_REF: release/ios/1.6.2
+      SHARED_TYPES_REF: main
+
+    steps:
+      - name: Create read-only installation token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.MOBILE_BUILD_BROKER_APP_ID }}
+          private-key: ${{ secrets.MOBILE_BUILD_BROKER_APP_KEY }}
+          owner: hacom-holding-dx
+          repositories: |
+            chat-mobile-client
+            chat-shared-types
+          skip-token-revoke: true
+
+      - name: Checkout fixed private repositories and revoke token
+        env:
+          INSTALLATION_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          private_root="$RUNNER_TEMP/private-build"
+          private_logs="$RUNNER_TEMP/private-logs"
+          mkdir -p "$private_root" "$private_logs"
+          token_revoked=false
+          revoke_token() {
+            if [ "$token_revoked" = false ]; then
+              curl --fail --silent --request DELETE \
+                --header "Authorization: Bearer $INSTALLATION_TOKEN" \
+                --header "Accept: application/vnd.github+json" \
+                https://api.github.com/installation/token \
+                >"$private_logs/token-revoke.log" 2>&1 || true
+            fi
+          }
+          trap revoke_token EXIT
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$INSTALLATION_TOKEN" | base64)"
+          git -c http.extraHeader="$auth_header" clone --quiet --depth 1 --single-branch --no-tags --branch "$MOBILE_REF" \
+            https://github.com/hacom-holding-dx/chat-mobile-client.git "$private_root/chat-mobile-client" \
+            >"$private_logs/mobile-checkout.log" 2>&1
+          git -c http.extraHeader="$auth_header" clone --quiet --depth 1 --single-branch --no-tags --branch "$SHARED_TYPES_REF" \
+            https://github.com/hacom-holding-dx/chat-shared-types.git "$private_root/chat-shared-types" \
+            >"$private_logs/shared-types-checkout.log" 2>&1
+          git -C "$private_root/chat-mobile-client" rev-parse HEAD >"$private_logs/mobile.sha"
+          git -C "$private_root/chat-shared-types" rev-parse HEAD >"$private_logs/shared-types.sha"
+          rm -rf -- "$private_root/chat-mobile-client/.git" "$private_root/chat-shared-types/.git"
+          curl --fail --silent --request DELETE \
+            --header "Authorization: Bearer $INSTALLATION_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            https://api.github.com/installation/token \
+            >"$private_logs/token-revoke.log" 2>&1
+          token_revoked=true
+          trap - EXIT
+          unset INSTALLATION_TOKEN auth_header
+          echo "PRIVATE CHECKOUT: PASS"
+          echo "INSTALLATION TOKEN: REVOKED"
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+
+      - name: Set up Ruby without cache
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: '4.0.1'
+          bundler-cache: false
+
+      - name: Verify private source and compile unsigned iOS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          private_root="$RUNNER_TEMP/private-build"
+          private_logs="$RUNNER_TEMP/private-logs"
+          run_stage() {
+            local stage="$1"
+            shift
+            if "$@" >"$private_logs/$stage.log" 2>&1; then
+              echo "$stage: PASS"
+            else
+              echo "$stage: FAIL"
+              exit 1
+            fi
+          }
+
+          mobile="$private_root/chat-mobile-client"
+          shared="$private_root/chat-shared-types"
+          test -f "$mobile/package-lock.json"
+          test -f "$shared/package-lock.json"
+          test -f "$mobile/ios/Podfile.lock"
+          test -f "$mobile/ios/ChatMobileClient.xcworkspace/contents.xcworkspacedata"
+
+          run_stage shared-install npm --prefix "$shared" ci --no-audit --no-fund
+          run_stage shared-build npm --prefix "$shared" run build
+          run_stage mobile-install npm --prefix "$mobile" ci --no-audit --no-fund
+          run_stage mobile-typecheck npm --prefix "$mobile" run typecheck
+          run_stage mobile-tests npm --prefix "$mobile" test -- --runInBand
+          run_stage bundle-install env BUNDLE_GEMFILE="$mobile/Gemfile" bundle install --jobs 4 --retry 3
+          run_stage pod-install env BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory="$mobile/ios" --deployment
+          run_stage ios-unsigned-compile xcodebuild \
+            -workspace "$mobile/ios/ChatMobileClient.xcworkspace" \
+            -scheme ChatMobileClient \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination generic/platform=iOS \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+          echo "UNSIGNED IOS COMPILE: PASS"
+          echo "SIGNING: NOT PERFORMED"
+          echo "ARCHIVE/EXPORT: NOT PERFORMED"
+
+      - name: Reject sensitive temporary diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          private_logs="$RUNNER_TEMP/private-logs"
+          if [ -d "$private_logs" ] && grep -EIlr \
+            'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|gh[pousr]_[A-Za-z0-9_]{20,}|Authorization:|AIza[0-9A-Za-z_-]{30,}' \
+            "$private_logs" >/dev/null 2>&1; then
+            echo "TEMPORARY LOG SCAN: FAIL"
+            exit 1
+          fi
+          echo "TEMPORARY LOG SCAN: PASS"
+
+      - name: Remove private source and build output
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          private_root="$RUNNER_TEMP/private-build"
+          private_logs="$RUNNER_TEMP/private-logs"
+          test "$private_root" = "$RUNNER_TEMP/private-build"
+          test "$private_logs" = "$RUNNER_TEMP/private-logs"
+          rm -rf -- "$private_root" "$private_logs" "$RUNNER_TEMP/DerivedData"
+          echo "EPHEMERAL CLEANUP: PASS"
