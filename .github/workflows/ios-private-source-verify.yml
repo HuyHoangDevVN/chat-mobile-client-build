@@ -38,8 +38,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          private_root="$RUNNER_TEMP/private-build"
+          private_root="/Users/runner/work/chat-mobile-client/chat-mobile-client"
           private_logs="$RUNNER_TEMP/private-logs"
+          test ! -e "/Users/runner/work/chat-mobile-client"
           mkdir -p "$private_root" "$private_logs"
           token_revoked=false
           revoke_token() {
@@ -88,7 +89,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          private_root="$RUNNER_TEMP/private-build"
+          private_root="/Users/runner/work/chat-mobile-client/chat-mobile-client"
           private_logs="$RUNNER_TEMP/private-logs"
           classify_pod_failure() {
             local log="$1"
@@ -114,19 +115,6 @@ jobs:
             fi
             echo "pod-install failure-class: $reason"
             echo "pod-install diagnostic-sha256: $(shasum -a 256 "$log" | cut -d ' ' -f 1)"
-            if [ "$reason" = "lockfile-drift" ]; then
-              cp "$mobile/ios/Podfile.lock" "$RUNNER_TEMP/Podfile.lock.before"
-              if env BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory=ios >"$private_logs/pod-install-refresh.log" 2>&1; then
-                ruby -ryaml -e '
-                  before = YAML.load_file(ARGV[0])
-                  after = YAML.load_file(ARGV[1])
-                  changed = (before.keys | after.keys).select { |key| before[key] != after[key] }
-                  puts "lockfile-drift-sections: #{changed.join(",")}"
-                ' "$RUNNER_TEMP/Podfile.lock.before" "$mobile/ios/Podfile.lock"
-              else
-                echo "lockfile-refresh: FAIL"
-              fi
-            fi
           }
           run_stage() {
             local stage="$1"
@@ -194,9 +182,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          private_root="$RUNNER_TEMP/private-build"
+          canonical_workspace="/Users/runner/work/chat-mobile-client"
           private_logs="$RUNNER_TEMP/private-logs"
-          test "$private_root" = "$RUNNER_TEMP/private-build"
+          test "$canonical_workspace" = "/Users/runner/work/chat-mobile-client"
           test "$private_logs" = "$RUNNER_TEMP/private-logs"
-          rm -rf -- "$private_root" "$private_logs" "$RUNNER_TEMP/DerivedData"
+          rm -rf -- "$canonical_workspace" "$private_logs" "$RUNNER_TEMP/DerivedData"
           echo "EPHEMERAL CLEANUP: PASS"
