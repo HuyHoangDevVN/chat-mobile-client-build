@@ -114,6 +114,19 @@ jobs:
             fi
             echo "pod-install failure-class: $reason"
             echo "pod-install diagnostic-sha256: $(shasum -a 256 "$log" | cut -d ' ' -f 1)"
+            if [ "$reason" = "lockfile-drift" ]; then
+              cp "$mobile/ios/Podfile.lock" "$RUNNER_TEMP/Podfile.lock.before"
+              if env BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory=ios >"$private_logs/pod-install-refresh.log" 2>&1; then
+                ruby -ryaml -e '
+                  before = YAML.load_file(ARGV[0])
+                  after = YAML.load_file(ARGV[1])
+                  changed = (before.keys | after.keys).select { |key| before[key] != after[key] }
+                  puts "lockfile-drift-sections: #{changed.join(",")}"
+                ' "$RUNNER_TEMP/Podfile.lock.before" "$mobile/ios/Podfile.lock"
+              else
+                echo "lockfile-refresh: FAIL"
+              fi
+            fi
           }
           run_stage() {
             local stage="$1"
