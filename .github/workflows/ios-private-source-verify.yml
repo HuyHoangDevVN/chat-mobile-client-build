@@ -123,6 +123,12 @@ jobs:
               reason="invalid-podfile"
             fi
             echo "pod-install failure-class: $reason"
+            podfile_line="$(grep -Eo 'Podfile:[0-9]+' "$log" | head -n 1 | cut -d ':' -f 2 || true)"
+            if [[ "$podfile_line" =~ ^[0-9]+$ ]]; then
+              echo "pod-install podfile-line: $podfile_line"
+            else
+              echo "pod-install podfile-line: unavailable"
+            fi
             echo "pod-install diagnostic-sha256: $(shasum -a 256 "$log" | cut -d ' ' -f 1)"
           }
           run_stage() {
