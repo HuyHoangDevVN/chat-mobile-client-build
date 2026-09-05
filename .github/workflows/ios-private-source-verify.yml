@@ -106,8 +106,9 @@ jobs:
           npm --prefix "$mobile" ci --no-audit --no-fund
           npm --prefix "$mobile" run typecheck
           npm --prefix "$mobile" test -- --runInBand
+          cd "$mobile"
           BUNDLE_GEMFILE="$mobile/Gemfile" bundle install --jobs 4 --retry 3
-          BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory="$mobile/ios" --deployment
+          BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory=ios --deployment
 
       - name: Materialize App Store Connect API key
         env:
