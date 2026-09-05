@@ -23,7 +23,7 @@ jobs:
     env:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
-      EXPECTED_MOBILE_SHA: 6479fa7fd45537c278556c073c7b9589e9c0dcf0
+      EXPECTED_MOBILE_SHA: 14a2655f7a9ac39a2d31ca222b84ba707a0879c0
       DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
