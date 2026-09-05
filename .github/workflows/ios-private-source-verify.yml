@@ -90,12 +90,42 @@ jobs:
           set -Eeuo pipefail
           private_root="$RUNNER_TEMP/private-build"
           private_logs="$RUNNER_TEMP/private-logs"
+          classify_pod_install_failure() {
+            local log="$1"
+            local reason="unclassified"
+            if grep -Eqi 'deployment mode|Podfile\.lock.*(out of date|changed|incompatible)|sandbox is not in sync' "$log"; then
+              reason="lockfile-drift"
+            elif grep -Eqi 'cannot load such file|LoadError' "$log"; then
+              reason="ruby-load-error"
+            elif grep -Eqi 'Invalid .*Podfile' "$log"; then
+              reason="invalid-podfile"
+            elif grep -Eqi 'Unable to find a specification|could not find compatible versions|Specs satisfying' "$log"; then
+              reason="dependency-resolution"
+            elif grep -Eqi 'unknown object version|unknown ISA|xcodeproj' "$log"; then
+              reason="xcodeproj"
+            elif grep -Eqi 'timed out|Could not connect|SSL|certificate' "$log"; then
+              reason="network"
+            elif grep -Eqi 'Permission denied|EACCES' "$log"; then
+              reason="permissions"
+            elif grep -Eqi 'unknown option.*deployment' "$log"; then
+              reason="cli-option"
+            elif grep -Eqi 'undefined method|NoMethodError|NameError|ArgumentError|RuntimeError' "$log"; then
+              reason="ruby-runtime"
+            elif grep -Eqi 'No space left' "$log"; then
+              reason="disk"
+            fi
+            echo "pod-install failure-class: $reason"
+            echo "pod-install diagnostic-sha256: $(shasum -a 256 "$log" | cut -d ' ' -f 1)"
+          }
           run_stage() {
             local stage="$1"
             shift
             if "$@" >"$private_logs/$stage.log" 2>&1; then
               echo "$stage: PASS"
             else
+              if [ "$stage" = "pod-install" ]; then
+                classify_pod_install_failure "$private_logs/$stage.log"
+              fi
               echo "$stage: FAIL"
               exit 1
             fi
