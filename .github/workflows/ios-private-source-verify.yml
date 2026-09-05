@@ -23,10 +23,15 @@ jobs:
     env:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
-      EXPECTED_MOBILE_SHA: 14a2655f7a9ac39a2d31ca222b84ba707a0879c0
+      EXPECTED_MOBILE_SHA: b637c07e1e826f7ab6eab3d4c93e75f2d06ab3f0
       DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
+      - name: Checkout broker workflow helpers
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
       - name: Create read-only installation token
         id: app-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
@@ -110,7 +115,7 @@ jobs:
           BUNDLE_GEMFILE="$mobile/Gemfile" bundle install --jobs 4 --retry 3
           BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory=ios --deployment
 
-      - name: Materialize App Store Connect API key
+      - name: Materialize read-only App Store Connect audit key
         env:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -130,57 +135,95 @@ jobs:
           echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
           echo "ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
 
-      - name: Revoke orphaned build 28 development certificate
-        env:
-          ORPHANED_CERT_SHA1: 7AE3F9F543ECBCAE1517E3DB27E014B1DCE975B5
+      - name: Read Apple signing inventory before archive
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 -m venv "$RUNNER_TEMP/cert-cleanup-venv"
-          "$RUNNER_TEMP/cert-cleanup-venv/bin/pip" install --quiet --disable-pip-version-check PyJWT cryptography
-          "$RUNNER_TEMP/cert-cleanup-venv/bin/python" - <<'PY'
-          import base64, json, os, urllib.request
-          import jwt
-          from cryptography import x509
-          from cryptography.hazmat.primitives import hashes, serialization
+          node .github/scripts/audit-apple-signing-assets.mjs "$RUNNER_TEMP/apple-signing-before.json"
 
-          key_path = os.path.join(os.environ['ASC_KEY_DIR'], f"AuthKey_{os.environ['ASC_KEY_ID']}.p8")
-          with open(key_path, 'rb') as handle:
-              private_key = serialization.load_pem_private_key(handle.read(), password=None)
-          token = jwt.encode(
-              {'iss': os.environ['ASC_ISSUER_ID'], 'aud': 'appstoreconnect-v1', 'exp': __import__('time').time() + 600},
-              private_key,
-              algorithm='ES256',
-              headers={'kid': os.environ['ASC_KEY_ID']},
-          )
-          headers = {'Authorization': f'Bearer {token}'}
-          with urllib.request.urlopen(urllib.request.Request(
-              'https://api.appstoreconnect.apple.com/v1/certificates?limit=200', headers=headers
-          )) as response:
-              certificates = json.load(response)['data']
-          expected = os.environ['ORPHANED_CERT_SHA1'].upper()
-          matches = []
-          for certificate in certificates:
-              content = certificate.get('attributes', {}).get('certificateContent')
-              if not content:
-                  continue
-              parsed = x509.load_der_x509_certificate(base64.b64decode(content))
-              if parsed.fingerprint(hashes.SHA1()).hex().upper() == expected:
-                  matches.append(certificate['id'])
-          if len(matches) != 1:
-              raise SystemExit(f'Expected exactly one orphaned certificate, found {len(matches)}')
-          request = urllib.request.Request(
-              f'https://api.appstoreconnect.apple.com/v1/certificates/{matches[0]}',
-              headers=headers,
-              method='DELETE',
-          )
-          with urllib.request.urlopen(request) as response:
-              if response.status != 204:
-                  raise SystemExit(f'Certificate revoke failed with HTTP {response.status}')
-          print('Revoked the pinned orphaned build 28 development certificate.')
+      - name: Require and install existing distribution signing assets
+        env:
+          DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          APP_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROFILE_BASE64 }}
+          SHARE_PROFILE_BASE64: ${{ secrets.IOS_SHARE_EXTENSION_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$DISTRIBUTION_P12_BASE64" || { echo 'Missing protected secret IOS_DISTRIBUTION_P12_BASE64'; exit 1; }
+          test -n "$P12_PASSWORD" || { echo 'Missing protected secret IOS_DISTRIBUTION_P12_PASSWORD'; exit 1; }
+          test -n "$APP_PROFILE_BASE64" || { echo 'Missing protected secret IOS_APP_STORE_PROFILE_BASE64'; exit 1; }
+          test -n "$SHARE_PROFILE_BASE64" || { echo 'Missing protected secret IOS_SHARE_EXTENSION_PROFILE_BASE64'; exit 1; }
+
+          SIGNING_ROOT="$RUNNER_TEMP/manual-signing"
+          KEYCHAIN_PATH="$RUNNER_TEMP/manual-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          echo "SIGNING_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          mkdir -p "$SIGNING_ROOT" "$HOME/Library/MobileDevice/Provisioning Profiles"
+          printf '%s' "$DISTRIBUTION_P12_BASE64" | openssl base64 -d -A > "$SIGNING_ROOT/distribution.p12"
+          printf '%s' "$APP_PROFILE_BASE64" | openssl base64 -d -A > "$SIGNING_ROOT/app.mobileprovision"
+          printf '%s' "$SHARE_PROFILE_BASE64" | openssl base64 -d -A > "$SIGNING_ROOT/share.mobileprovision"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$SIGNING_ROOT/distribution.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          test "$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -c 'Apple Distribution')" -eq 1
+
+          openssl pkcs12 -in "$SIGNING_ROOT/distribution.p12" -clcerts -nokeys \
+            -passin env:P12_PASSWORD -out "$SIGNING_ROOT/distribution.pem"
+          openssl x509 -in "$SIGNING_ROOT/distribution.pem" -checkend 0 -noout
+          CERT_NAME="$(openssl x509 -in "$SIGNING_ROOT/distribution.pem" -noout -subject -nameopt RFC2253 | sed -n 's/^subject=.*CN=\([^,]*\).*$/\1/p')"
+          test -n "$CERT_NAME"
+          case "$CERT_NAME" in Apple\ Distribution:*) ;; *) echo 'Signing certificate is not Apple Distribution'; exit 1 ;; esac
+          CERT_EXPIRES="$(openssl x509 -in "$SIGNING_ROOT/distribution.pem" -noout -enddate | cut -d= -f2-)"
+          CERT_SHA256="$(openssl x509 -in "$SIGNING_ROOT/distribution.pem" -outform DER | shasum -a 256 | cut -d ' ' -f1)"
+          export CERT_SHA256 SIGNING_ROOT
+          printf 'certificate\t%s\tIOS_DISTRIBUTION\t%s\n' "$CERT_NAME" "$CERT_EXPIRES"
+
+          security cms -D -i "$SIGNING_ROOT/app.mobileprovision" > "$SIGNING_ROOT/app.plist"
+          security cms -D -i "$SIGNING_ROOT/share.mobileprovision" > "$SIGNING_ROOT/share.plist"
+          python3 - <<'PY'
+          import datetime, hashlib, os, plistlib, shutil
+
+          root = os.environ['SIGNING_ROOT']
+          expected_cert = os.environ['CERT_SHA256']
+          profile_dir = os.path.expanduser('~/Library/MobileDevice/Provisioning Profiles')
+          expected_team = os.environ['DEVELOPMENT_TEAM']
+          for stem, bundle_id, env_prefix in (
+              ('app', 'com.hacom.chat', 'APP'),
+              ('share', 'com.hacom.chat.share', 'SHARE'),
+          ):
+              with open(os.path.join(root, f'{stem}.plist'), 'rb') as handle:
+                  profile = plistlib.load(handle)
+              expiry = profile['ExpirationDate']
+              if expiry <= datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None):
+                  raise SystemExit(f'{stem} provisioning profile is expired')
+              if profile.get('ProvisionedDevices') or profile.get('ProvisionsAllDevices'):
+                  raise SystemExit(f'{stem} profile is not an App Store profile')
+              entitlements = profile['Entitlements']
+              if entitlements.get('get-task-allow') is not False:
+                  raise SystemExit(f'{stem} profile permits development debugging')
+              if profile['TeamIdentifier'] != [expected_team]:
+                  raise SystemExit(f'{stem} profile has the wrong team')
+              if entitlements.get('application-identifier') != f'{expected_team}.{bundle_id}':
+                  raise SystemExit(f'{stem} profile has the wrong bundle identifier')
+              fingerprints = {hashlib.sha256(cert).hexdigest() for cert in profile['DeveloperCertificates']}
+              if expected_cert not in fingerprints:
+                  raise SystemExit(f'{stem} profile does not contain the supplied Distribution certificate')
+              name, uuid = profile['Name'], profile['UUID']
+              shutil.copyfile(
+                  os.path.join(root, f'{stem}.mobileprovision'),
+                  os.path.join(profile_dir, f'{uuid}.mobileprovision'),
+              )
+              print(f'profile\t{name}\tIOS_APP_STORE\t{expiry.isoformat()}Z')
+              with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+                  handle.write(f'{env_prefix}_STORE_PROFILE_NAME={name}\n{env_prefix}_PROFILE_UUID={uuid}\n')
           PY
 
-      - name: Archive and export App Store IPA
+      - name: Archive and export App Store IPA with manual signing
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -191,32 +234,42 @@ jobs:
             -configuration Release \
             -archivePath "$RUNNER_TEMP/ChatMobileClient.xcarchive" \
             -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY='Apple Distribution' \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            APP_STORE_PROFILE_NAME="$APP_STORE_PROFILE_NAME" \
+            SHARE_EXTENSION_PROFILE_NAME="$SHARE_STORE_PROFILE_NAME"
           APP_PATH="$RUNNER_TEMP/ChatMobileClient.xcarchive/Products/Applications/ChatMobileClient.app"
           test -d "$APP_PATH/PlugIns/ShareExtension.appex"
           codesign --verify --deep --strict "$APP_PATH"
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>teamID</key><string>${DEVELOPMENT_TEAM}</string>
-            <key>signingStyle</key><string>automatic</string>
-          </dict></plist>
-          PLIST
+          export APP_STORE_PROFILE_NAME SHARE_STORE_PROFILE_NAME DEVELOPMENT_TEAM
+          python3 - <<'PY'
+          import os, plistlib
+          options = {
+              'method': 'app-store-connect',
+              'teamID': os.environ['DEVELOPMENT_TEAM'],
+              'signingStyle': 'manual',
+              'signingCertificate': 'Apple Distribution',
+              'provisioningProfiles': {
+                  'com.hacom.chat': os.environ['APP_STORE_PROFILE_NAME'],
+                  'com.hacom.chat.share': os.environ['SHARE_STORE_PROFILE_NAME'],
+              },
+          }
+          with open(os.path.join(os.environ['RUNNER_TEMP'], 'ExportOptions.plist'), 'wb') as handle:
+              plistlib.dump(options, handle)
+          PY
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/ChatMobileClient.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Verify Apple signing inventory is unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node .github/scripts/audit-apple-signing-assets.mjs "$RUNNER_TEMP/apple-signing-after.json"
+          cmp "$RUNNER_TEMP/apple-signing-before.json" "$RUNNER_TEMP/apple-signing-after.json"
 
       - name: Validate signed IPA
         shell: bash
@@ -236,6 +289,11 @@ jobs:
           test -f "$SHAREEXT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SHAREEXT_PLIST")" = 'com.hacom.chat.share'
           codesign --verify --deep --strict "$MAIN_APP"
+          codesign -d --verbose=4 "$MAIN_APP" 2>&1 | grep -q '^Authority=Apple Distribution:'
+          security cms -D -i "$MAIN_APP/embedded.mobileprovision" > "$RUNNER_TEMP/ipa-check/app-profile.plist"
+          security cms -D -i "$MAIN_APP/PlugIns/ShareExtension.appex/embedded.mobileprovision" > "$RUNNER_TEMP/ipa-check/share-profile.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/ipa-check/app-profile.plist")" = "$APP_STORE_PROFILE_NAME"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/ipa-check/share-profile.plist")" = "$SHARE_STORE_PROFILE_NAME"
           IPA_SHA256="$(shasum -a 256 "$IPA_PATH" | cut -d ' ' -f 1)"
           {
             echo "MOBILE_SHA=$MOBILE_SHA"
@@ -260,6 +318,16 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          if [ -n "${SIGNING_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN_PATH" >/dev/null 2>&1 || true
+          fi
+          if [ -n "${APP_PROFILE_UUID:-}" ]; then
+            rm -f -- "$HOME/Library/MobileDevice/Provisioning Profiles/${APP_PROFILE_UUID}.mobileprovision"
+          fi
+          if [ -n "${SHARE_PROFILE_UUID:-}" ]; then
+            rm -f -- "$HOME/Library/MobileDevice/Provisioning Profiles/${SHARE_PROFILE_UUID}.mobileprovision"
+          fi
           rm -rf -- "$RUNNER_TEMP/private-source" "$RUNNER_TEMP/asc-key" "$RUNNER_TEMP/export" \
-            "$RUNNER_TEMP/ChatMobileClient.xcarchive" "$RUNNER_TEMP/ipa-check"
-          rm -f -- "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/ios-release-validation.txt"
+            "$RUNNER_TEMP/manual-signing" "$RUNNER_TEMP/ChatMobileClient.xcarchive" "$RUNNER_TEMP/ipa-check"
+          rm -f -- "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/ios-release-validation.txt" \
+            "$RUNNER_TEMP/apple-signing-before.json" "$RUNNER_TEMP/apple-signing-after.json"

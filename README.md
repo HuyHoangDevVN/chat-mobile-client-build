@@ -21,6 +21,16 @@ runs source gates, signs and exports exactly one IPA, validates its bundle and
 signature, and retains it as a seven-day Actions artifact. TestFlight upload
 remains a separate manual workflow in the private mobile repository.
 
+Release signing is manual and fail-closed. The protected Environment must
+already contain one Apple Distribution `.p12` and separate App Store profiles
+for `com.hacom.chat` and `com.hacom.chat.share`. The workflow never enables
+provisioning updates and never creates, revokes or replaces Apple signing
+assets. It reads the Apple certificate/profile inventory before and after the
+archive and fails if the metadata changes.
+
 Signing values are GitHub Environment secrets. They must never be committed,
 printed, uploaded as diagnostics, or made available to pull-request workflows.
+Required signing secret names are `IOS_DISTRIBUTION_P12_BASE64`,
+`IOS_DISTRIBUTION_P12_PASSWORD`, `IOS_APP_STORE_PROFILE_BASE64`, and
+`IOS_SHARE_EXTENSION_PROFILE_BASE64`.
 
