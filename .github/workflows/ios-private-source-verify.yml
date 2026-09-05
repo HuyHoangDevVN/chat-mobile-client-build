@@ -136,8 +136,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 -m pip install --quiet --disable-pip-version-check PyJWT cryptography
-          python3 - <<'PY'
+          python3 -m venv "$RUNNER_TEMP/cert-cleanup-venv"
+          "$RUNNER_TEMP/cert-cleanup-venv/bin/pip" install --quiet --disable-pip-version-check PyJWT cryptography
+          "$RUNNER_TEMP/cert-cleanup-venv/bin/python" - <<'PY'
           import base64, json, os, urllib.request
           import jwt
           from cryptography import x509
