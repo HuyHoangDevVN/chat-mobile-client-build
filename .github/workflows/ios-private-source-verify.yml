@@ -4,26 +4,26 @@ on:
   workflow_dispatch:
     inputs:
       confirm_release:
-        description: 'Type BUILD_IOS_1_6_3_28 to build the signed iOS 1.6.3 (28) IPA.'
+        description: 'Type BUILD_IOS_1_6_3_29 to build the signed iOS 1.6.3 (29) IPA.'
         required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-1.6.3-build28
+  group: ios-1.6.3-build29
   cancel-in-progress: false
 
 jobs:
   archive:
-    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_28' }}
+    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_29' }}
     runs-on: macos-26
     timeout-minutes: 90
     environment: private-source-read
     env:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
-      EXPECTED_MOBILE_SHA: 0c1c9b18bae9fb6d6eb754e23f113567c940c589
+      EXPECTED_MOBILE_SHA: 6479fa7fd45537c278556c073c7b9589e9c0dcf0
       DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
@@ -181,7 +181,7 @@ jobs:
           MAIN_APP="$(find "$RUNNER_TEMP/ipa-check/Payload" -type d -name '*.app' -print | head -n 1)"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$MAIN_APP/Info.plist")" = 'com.hacom.chat'
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MAIN_APP/Info.plist")" = '1.6.3'
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MAIN_APP/Info.plist")" = '28'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MAIN_APP/Info.plist")" = '29'
           SHAREEXT_PLIST="$MAIN_APP/PlugIns/ShareExtension.appex/Info.plist"
           test -f "$SHAREEXT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SHAREEXT_PLIST")" = 'com.hacom.chat.share'
@@ -190,7 +190,7 @@ jobs:
           {
             echo "MOBILE_SHA=$MOBILE_SHA"
             echo 'MAIN_VERSION=1.6.3'
-            echo 'MAIN_BUILD=28'
+            echo 'MAIN_BUILD=29'
             echo "IPA_SHA256=$IPA_SHA256"
             echo 'SIGNATURE_VALIDATION=PASS'
           } > "$RUNNER_TEMP/ios-release-validation.txt"
@@ -198,7 +198,7 @@ jobs:
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v6
         with:
-          name: hacom-holdings-ios-1.6.3-build28
+          name: hacom-holdings-ios-1.6.3-build29
           path: |
             ${{ runner.temp }}/export/*.ipa
             ${{ runner.temp }}/ios-release-validation.txt
