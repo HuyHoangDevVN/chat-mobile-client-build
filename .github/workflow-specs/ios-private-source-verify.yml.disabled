@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 75
     environment: private-source-read
     env:
-      MOBILE_REF: release/ios/1.6.2
+      MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
 
     steps:
