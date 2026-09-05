@@ -1,23 +1,30 @@
-name: iOS Private Source Unsigned Verification
+name: iOS 1.6.3 Signed IPA Build
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_release:
+        description: 'Type BUILD_IOS_1_6_3_28 to build the signed iOS 1.6.3 (28) IPA.'
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-private-source-verify
+  group: ios-1.6.3-build28
   cancel-in-progress: false
 
 jobs:
-  verify:
+  archive:
+    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_28' }}
     runs-on: macos-26
-    timeout-minutes: 75
+    timeout-minutes: 90
     environment: private-source-read
     env:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
+      EXPECTED_MOBILE_SHA: 1436e2b8aad675e4772cd046929390a439482c98
+      DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
       - name: Create read-only installation token
@@ -32,159 +39,176 @@ jobs:
             chat-shared-types
           skip-token-revoke: true
 
-      - name: Checkout fixed private repositories and revoke token
+      - name: Checkout fixed private source and revoke token
         env:
           INSTALLATION_TOKEN: ${{ steps.app-token.outputs.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          private_root="/Users/runner/work/chat-mobile-client/chat-mobile-client"
-          private_logs="$RUNNER_TEMP/private-logs"
-          test ! -e "/Users/runner/work/chat-mobile-client"
-          mkdir -p "$private_root" "$private_logs"
+          private_root="$RUNNER_TEMP/private-source"
+          mkdir -p "$private_root"
           token_revoked=false
           revoke_token() {
             if [ "$token_revoked" = false ]; then
               curl --fail --silent --request DELETE \
                 --header "Authorization: Bearer $INSTALLATION_TOKEN" \
                 --header "Accept: application/vnd.github+json" \
-                https://api.github.com/installation/token \
-                >"$private_logs/token-revoke.log" 2>&1 || true
+                https://api.github.com/installation/token >/dev/null 2>&1 || true
             fi
           }
           trap revoke_token EXIT
           auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$INSTALLATION_TOKEN" | base64 | tr -d '\n')"
-          git -c http.extraHeader="$auth_header" clone --quiet --depth 1 --single-branch --no-tags --branch "$MOBILE_REF" \
-            https://github.com/hacom-holding-dx/chat-mobile-client.git "$private_root/chat-mobile-client" \
-            >"$private_logs/mobile-checkout.log" 2>&1
+          git -c http.extraHeader="$auth_header" clone --quiet --depth 10 --single-branch --no-tags --branch "$MOBILE_REF" \
+            https://github.com/hacom-holding-dx/chat-mobile-client.git "$private_root/chat-mobile-client"
           git -c http.extraHeader="$auth_header" clone --quiet --depth 1 --single-branch --no-tags --branch "$SHARED_TYPES_REF" \
-            https://github.com/hacom-holding-dx/chat-shared-types.git "$private_root/chat-shared-types" \
-            >"$private_logs/shared-types-checkout.log" 2>&1
-          git -C "$private_root/chat-mobile-client" rev-parse HEAD >"$private_logs/mobile.sha"
-          git -C "$private_root/chat-shared-types" rev-parse HEAD >"$private_logs/shared-types.sha"
-          rm -rf -- "$private_root/chat-mobile-client/.git" "$private_root/chat-shared-types/.git"
+            https://github.com/hacom-holding-dx/chat-shared-types.git "$private_root/chat-shared-types"
+          git -C "$private_root/chat-mobile-client" checkout --quiet --detach "$EXPECTED_MOBILE_SHA"
+          MOBILE_SHA="$(git -C "$private_root/chat-mobile-client" rev-parse HEAD)"
+          test "$MOBILE_SHA" = "$EXPECTED_MOBILE_SHA"
           curl --fail --silent --request DELETE \
             --header "Authorization: Bearer $INSTALLATION_TOKEN" \
             --header "Accept: application/vnd.github+json" \
-            https://api.github.com/installation/token \
-            >"$private_logs/token-revoke.log" 2>&1
+            https://api.github.com/installation/token
           token_revoked=true
           trap - EXIT
-          unset INSTALLATION_TOKEN auth_header
-          echo "PRIVATE CHECKOUT: PASS"
-          echo "INSTALLATION TOKEN: REVOKED"
+          rm -rf -- "$private_root/chat-mobile-client/.git" "$private_root/chat-shared-types/.git"
+          echo "PRIVATE_ROOT=$private_root" >> "$GITHUB_ENV"
+          echo "MOBILE_SHA=$MOBILE_SHA" >> "$GITHUB_ENV"
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
 
-      - name: Set up Ruby without cache
+      - name: Set up Ruby
         uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: '4.0.1'
           bundler-cache: false
 
-      - name: Verify private source and compile unsigned iOS
+      - name: Select Xcode 26
         shell: bash
         run: |
           set -Eeuo pipefail
-          private_root="/Users/runner/work/chat-mobile-client/chat-mobile-client"
-          private_logs="$RUNNER_TEMP/private-logs"
-          classify_pod_failure() {
-            local log="$1"
-            local reason="unclassified"
-            if grep -Fqi 'There were changes to the podfile in deployment mode' "$log"; then
-              reason="podfile-drift"
-            elif grep -Fqi 'There were changes to the lockfile in deployment mode' "$log"; then
-              reason="lockfile-drift"
-            elif grep -Eqi 'Podfile\.lock.*(out of date|changed|incompatible)|sandbox is not in sync' "$log"; then
-              reason="lockfile-drift"
-            elif grep -Eqi 'could not find compatible versions|Specs satisfying|Unable to find a specification' "$log"; then
-              reason="dependency-resolution"
-            elif grep -Eqi 'CDN|Could not connect|timed out|SSL|certificate|Unable to add a source' "$log"; then
-              reason="network"
-            elif grep -Eqi 'unknown object version|unknown ISA|xcodeproj|integrate.*project' "$log"; then
-              reason="xcodeproj"
-            elif grep -Eqi 'checksum|did not match' "$log"; then
-              reason="checksum"
-            elif grep -Eqi 'NoMethodError|NameError|ArgumentError|RuntimeError|LoadError' "$log"; then
-              reason="ruby-runtime"
-            elif grep -Eqi 'Invalid .*Podfile' "$log"; then
-              reason="invalid-podfile"
-            fi
-            echo "pod-install failure-class: $reason"
-            echo "pod-install diagnostic-sha256: $(shasum -a 256 "$log" | cut -d ' ' -f 1)"
-          }
-          run_stage() {
-            local stage="$1"
-            shift
-            if "$@" >"$private_logs/$stage.log" 2>&1; then
-              echo "$stage: PASS"
-            else
-              if [ "$stage" = "pod-install" ]; then
-                classify_pod_failure "$private_logs/$stage.log"
-              fi
-              echo "$stage: FAIL"
-              exit 1
-            fi
-          }
-
-          mobile="$private_root/chat-mobile-client"
-          shared="$private_root/chat-shared-types"
           xcode_app="$(find /Applications -maxdepth 1 -type d -name 'Xcode_26*.app' -print | sort -V | tail -n 1)"
           test -n "$xcode_app"
-          export DEVELOPER_DIR="$xcode_app/Contents/Developer"
-          test -f "$mobile/package-lock.json"
-          test -f "$shared/package-lock.json"
-          test -f "$mobile/ios/Podfile.lock"
-          test -f "$mobile/ios/ChatMobileClient.xcworkspace/contents.xcworkspacedata"
-          cd "$mobile"
+          echo "DEVELOPER_DIR=$xcode_app/Contents/Developer" >> "$GITHUB_ENV"
 
-          run_stage shared-install npm --prefix "$shared" ci --no-audit --no-fund
-          run_stage shared-build npm --prefix "$shared" run build
-          run_stage mobile-install npm --prefix "$mobile" ci --no-audit --no-fund
-          run_stage mobile-typecheck npm --prefix "$mobile" run typecheck
-          run_stage mobile-tests npm --prefix "$mobile" test -- --runInBand
-          run_stage bundle-install env BUNDLE_GEMFILE="$mobile/Gemfile" bundle install --jobs 4 --retry 3
-          run_stage pod-install env BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory=ios --deployment
-          run_stage ios-unsigned-compile xcodebuild \
-            -workspace "$mobile/ios/ChatMobileClient.xcworkspace" \
+      - name: Install and test private source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mobile="$PRIVATE_ROOT/chat-mobile-client"
+          shared="$PRIVATE_ROOT/chat-shared-types"
+          npm --prefix "$shared" ci --no-audit --no-fund
+          npm --prefix "$shared" run build
+          cp "$mobile/.env.example" "$mobile/.env"
+          npm --prefix "$mobile" ci --no-audit --no-fund
+          npm --prefix "$mobile" run typecheck
+          npm --prefix "$mobile" test -- --runInBand
+          BUNDLE_GEMFILE="$mobile/Gemfile" bundle install --jobs 4 --retry 3
+          BUNDLE_GEMFILE="$mobile/Gemfile" bundle exec pod install --project-directory="$mobile/ios" --deployment
+
+      - name: Materialize App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+          test -n "$ASC_PRIVATE_KEY"
+          ASC_KEY_DIR="$RUNNER_TEMP/asc-key"
+          mkdir -p "$ASC_KEY_DIR"
+          chmod 700 "$ASC_KEY_DIR"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$ASC_KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$ASC_KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_DIR=$ASC_KEY_DIR" >> "$GITHUB_ENV"
+          echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Archive and export App Store IPA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$PRIVATE_ROOT/chat-mobile-client"
+          xcodebuild archive \
+            -workspace ios/ChatMobileClient.xcworkspace \
             -scheme ChatMobileClient \
             -configuration Release \
-            -sdk iphoneos \
-            -destination generic/platform=iOS \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
+            -archivePath "$RUNNER_TEMP/ChatMobileClient.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
+          APP_PATH="$RUNNER_TEMP/ChatMobileClient.xcarchive/Products/Applications/ChatMobileClient.app"
+          test -d "$APP_PATH/PlugIns/ShareExtension.appex"
+          codesign --verify --deep --strict "$APP_PATH"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${DEVELOPMENT_TEAM}</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/ChatMobileClient.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
-          echo "UNSIGNED IOS COMPILE: PASS"
-          echo "SIGNING: NOT PERFORMED"
-          echo "ARCHIVE/EXPORT: NOT PERFORMED"
+      - name: Validate signed IPA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          IPA_COUNT="$(find "$RUNNER_TEMP/export" -type f -name '*.ipa' -print | wc -l | tr -d '[:space:]')"
+          test "$IPA_COUNT" -eq 1
+          IPA_PATH="$(find "$RUNNER_TEMP/export" -type f -name '*.ipa' -print | head -n 1)"
+          test -s "$IPA_PATH"
+          mkdir -p "$RUNNER_TEMP/ipa-check"
+          unzip -q "$IPA_PATH" -d "$RUNNER_TEMP/ipa-check"
+          MAIN_APP="$(find "$RUNNER_TEMP/ipa-check/Payload" -type d -name '*.app' -print | head -n 1)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$MAIN_APP/Info.plist")" = 'com.hacom.chat'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MAIN_APP/Info.plist")" = '1.6.3'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MAIN_APP/Info.plist")" = '28'
+          SHAREEXT_PLIST="$MAIN_APP/PlugIns/ShareExtension.appex/Info.plist"
+          test -f "$SHAREEXT_PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SHAREEXT_PLIST")" = 'com.hacom.chat.share'
+          codesign --verify --deep --strict "$MAIN_APP"
+          IPA_SHA256="$(shasum -a 256 "$IPA_PATH" | cut -d ' ' -f 1)"
+          {
+            echo "MOBILE_SHA=$MOBILE_SHA"
+            echo 'MAIN_VERSION=1.6.3'
+            echo 'MAIN_BUILD=28'
+            echo "IPA_SHA256=$IPA_SHA256"
+            echo 'SIGNATURE_VALIDATION=PASS'
+          } > "$RUNNER_TEMP/ios-release-validation.txt"
 
-      - name: Reject sensitive temporary diagnostics
+      - name: Upload signed IPA artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hacom-holdings-ios-1.6.3-build28
+          path: |
+            ${{ runner.temp }}/export/*.ipa
+            ${{ runner.temp }}/ios-release-validation.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove private source and signing material
         if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
-          private_logs="$RUNNER_TEMP/private-logs"
-          if [ -d "$private_logs" ] && grep -EIlr \
-            'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|gh[pousr]_[A-Za-z0-9_]{20,}|Authorization:|AIza[0-9A-Za-z_-]{30,}' \
-            "$private_logs" >/dev/null 2>&1; then
-            echo "TEMPORARY LOG SCAN: FAIL"
-            exit 1
-          fi
-          echo "TEMPORARY LOG SCAN: PASS"
-
-      - name: Remove private source and build output
-        if: always()
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          canonical_workspace="/Users/runner/work/chat-mobile-client"
-          private_logs="$RUNNER_TEMP/private-logs"
-          test "$canonical_workspace" = "/Users/runner/work/chat-mobile-client"
-          test "$private_logs" = "$RUNNER_TEMP/private-logs"
-          rm -rf -- "$canonical_workspace" "$private_logs" "$RUNNER_TEMP/DerivedData"
-          echo "EPHEMERAL CLEANUP: PASS"
+          rm -rf -- "$RUNNER_TEMP/private-source" "$RUNNER_TEMP/asc-key" "$RUNNER_TEMP/export" \
+            "$RUNNER_TEMP/ChatMobileClient.xcarchive" "$RUNNER_TEMP/ipa-check"
+          rm -f -- "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/ios-release-validation.txt"
