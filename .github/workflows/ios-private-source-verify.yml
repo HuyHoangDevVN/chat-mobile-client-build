@@ -93,12 +93,20 @@ jobs:
           classify_pod_install_failure() {
             local log="$1"
             local reason="unclassified"
-            if grep -Eqi 'deployment mode|Podfile\.lock.*(out of date|changed|incompatible)|sandbox is not in sync' "$log"; then
-              reason="lockfile-drift"
+            if grep -Eqi 'Cannot find module|MODULE_NOT_FOUND|node:internal' "$log"; then
+              reason="node-module-resolution"
+            elif grep -Eqi 'JSON::ParserError|unexpected token.*JSON|invalid JSON' "$log"; then
+              reason="native-config-json"
+            elif grep -Eqi 'No such file or directory' "$log"; then
+              reason="missing-file"
+            elif grep -Eqi 'syntax error|SyntaxError' "$log"; then
+              reason="syntax"
             elif grep -Eqi 'cannot load such file|LoadError' "$log"; then
               reason="ruby-load-error"
-            elif grep -Eqi 'Invalid .*Podfile' "$log"; then
-              reason="invalid-podfile"
+            elif grep -Eqi 'undefined method|uninitialized constant|NoMethodError|NameError|ArgumentError|RuntimeError' "$log"; then
+              reason="ruby-runtime"
+            elif grep -Eqi 'deployment mode|Podfile\.lock.*(out of date|changed|incompatible)|sandbox is not in sync' "$log"; then
+              reason="lockfile-drift"
             elif grep -Eqi 'Unable to find a specification|could not find compatible versions|Specs satisfying' "$log"; then
               reason="dependency-resolution"
             elif grep -Eqi 'unknown object version|unknown ISA|xcodeproj' "$log"; then
@@ -109,10 +117,10 @@ jobs:
               reason="permissions"
             elif grep -Eqi 'unknown option.*deployment' "$log"; then
               reason="cli-option"
-            elif grep -Eqi 'undefined method|NoMethodError|NameError|ArgumentError|RuntimeError' "$log"; then
-              reason="ruby-runtime"
             elif grep -Eqi 'No space left' "$log"; then
               reason="disk"
+            elif grep -Eqi 'Invalid .*Podfile' "$log"; then
+              reason="invalid-podfile"
             fi
             echo "pod-install failure-class: $reason"
             echo "pod-install diagnostic-sha256: $(shasum -a 256 "$log" | cut -d ' ' -f 1)"
