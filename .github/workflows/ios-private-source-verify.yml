@@ -93,7 +93,11 @@ jobs:
           classify_pod_failure() {
             local log="$1"
             local reason="unclassified"
-            if grep -Eqi 'deployment mode|Podfile\.lock.*(out of date|changed|incompatible)|sandbox is not in sync' "$log"; then
+            if grep -Fqi 'There were changes to the podfile in deployment mode' "$log"; then
+              reason="podfile-drift"
+            elif grep -Fqi 'There were changes to the lockfile in deployment mode' "$log"; then
+              reason="lockfile-drift"
+            elif grep -Eqi 'Podfile\.lock.*(out of date|changed|incompatible)|sandbox is not in sync' "$log"; then
               reason="lockfile-drift"
             elif grep -Eqi 'could not find compatible versions|Specs satisfying|Unable to find a specification' "$log"; then
               reason="dependency-resolution"
