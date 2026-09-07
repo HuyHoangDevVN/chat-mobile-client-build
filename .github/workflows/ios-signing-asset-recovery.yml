@@ -1,0 +1,70 @@
+name: iOS Signing Asset Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_recovery:
+        description: 'Type RECOVER_IOS_SIGNING_ASSETS to download existing signing assets only.'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: ${{ inputs.confirm_recovery == 'RECOVER_IOS_SIGNING_ASSETS' }}
+    runs-on: ubuntu-latest
+    environment: private-source-read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Materialize read-only App Store Connect audit key
+        env:
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$ASC_PRIVATE_KEY"
+          key_dir="$RUNNER_TEMP/asc-key"
+          mkdir -p "$key_dir"
+          chmod 700 "$key_dir"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_DIR=$key_dir" >> "$GITHUB_ENV"
+          echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
+          echo "SIGNING_ASSET_OUTPUT=$RUNNER_TEMP/signing-assets" >> "$GITHUB_ENV"
+
+      - name: Read signing inventory before recovery
+        shell: bash
+        run: node .github/scripts/audit-apple-signing-assets.mjs "$RUNNER_TEMP/apple-signing-before.json"
+
+      - name: Download existing signing assets
+        shell: bash
+        run: node .github/scripts/download-apple-signing-assets.mjs
+
+      - name: Verify signing inventory is unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node .github/scripts/audit-apple-signing-assets.mjs "$RUNNER_TEMP/apple-signing-after.json"
+          cmp "$RUNNER_TEMP/apple-signing-before.json" "$RUNNER_TEMP/apple-signing-after.json"
+
+      - name: Upload recovered signing assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-signing-assets-recovery
+          path: ${{ runner.temp }}/signing-assets/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove runner signing material
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/asc-key" "$RUNNER_TEMP/signing-assets" "$RUNNER_TEMP/apple-signing-before.json" "$RUNNER_TEMP/apple-signing-after.json"
