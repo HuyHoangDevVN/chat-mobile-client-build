@@ -16,10 +16,20 @@ after both controls pass:
    - https://docs.github.com/actions/reference/runners/github-hosted-runners
    - https://github.com/actions/create-github-app-token
 
-For iOS 1.6.3 build 29, the broker checks out the fixed private release SHA,
-runs source gates, signs and exports exactly one IPA, validates its bundle and
-signature, and retains it as a seven-day Actions artifact. TestFlight upload
-remains a separate manual workflow in the private mobile repository.
+For iOS 1.6.3 build 35, the broker checks out the fixed private release and
+shared-types SHAs, runs source gates, signs and exports exactly one IPA,
+validates its bundle and signature, and retains it as a seven-day Actions
+artifact. The separate `ios-testflight-upload.yml` workflow is manual-only. It
+checks the exact archive run, downloads the validated public artifact, verifies
+the source SHA, version/build, signature and IPA checksum, checks App Store
+Connect for a build collision, then uploads that same IPA. It does not check
+out private source, archive, or export an app.
+
+Both workflows require the protected `private-source-read` Environment and its
+reviewer. The upload workflow uses the existing `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_ISSUER_ID`, and `APP_STORE_CONNECT_PRIVATE_KEY` Environment
+secrets. It creates no API keys and runs only on the public broker's standard
+GitHub-hosted macOS runner.
 
 Release signing is manual and fail-closed. The protected Environment must
 already contain one Apple Distribution `.p12` and separate App Store profiles
