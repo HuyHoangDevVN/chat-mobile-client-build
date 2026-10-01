@@ -24,6 +24,7 @@ jobs:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
       EXPECTED_MOBILE_SHA: 2c129a8f0549ab47968463ce93b1673a2fa68c6b
+      EXPECTED_SHARED_TYPES_SHA: 4271100be76fb0edd60d239da4569cae1814928b
       IOS_APP_ID: "6784205119"
       IOS_MARKETING_VERSION: "1.6.3"
       IOS_BUILD_NUMBER: "35"
@@ -70,6 +71,8 @@ jobs:
             https://github.com/hacom-holding-dx/chat-mobile-client.git "$private_root/chat-mobile-client"
           git -c http.extraHeader="$auth_header" clone --quiet --depth 1 --single-branch --no-tags --branch "$SHARED_TYPES_REF" \
             https://github.com/hacom-holding-dx/chat-shared-types.git "$private_root/chat-shared-types"
+          SHARED_TYPES_SHA="$(git -C "$private_root/chat-shared-types" rev-parse HEAD)"
+          test "$SHARED_TYPES_SHA" = "$EXPECTED_SHARED_TYPES_SHA"
           git -C "$private_root/chat-mobile-client" checkout --quiet --detach "$EXPECTED_MOBILE_SHA"
           MOBILE_SHA="$(git -C "$private_root/chat-mobile-client" rev-parse HEAD)"
           test "$MOBILE_SHA" = "$EXPECTED_MOBILE_SHA"
