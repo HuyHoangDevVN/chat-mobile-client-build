@@ -128,6 +128,7 @@ jobs:
           key_path="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
           test ! -e "$key_path"
           trap 'rm -f -- "$key_path"' ERR INT TERM
+          echo "ASC_KEY_DIR=$key_dir" >> "$GITHUB_ENV"
           echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
           echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
           echo "ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
