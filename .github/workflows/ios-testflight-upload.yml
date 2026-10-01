@@ -1,0 +1,165 @@
+name: iOS 1.6.3 build 35 TestFlight upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Validated public archive run ID for iOS 1.6.3 (35).'
+        required: true
+      confirm_upload:
+        description: 'Type UPLOAD_TESTFLIGHT_IOS_1_6_3_35 to upload build 1.6.3 (35).'
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ios-testflight-upload-1.6.3-build35
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    if: >-
+      ${{ github.ref_name == 'main' &&
+          inputs.source_run_id == '36835000507' &&
+          inputs.confirm_upload == 'UPLOAD_TESTFLIGHT_IOS_1_6_3_35' }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    environment: private-source-read
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_REPO: HuyHoangDevVN/chat-mobile-client-build
+      EXPECTED_BROKER_SHA: 1a268de01879dbd34047e22ce2beb83db936612e
+      EXPECTED_MOBILE_SHA: 2c129a8f0549ab47968463ce93b1673a2fa68c6b
+      EXPECTED_IPA_SHA256: e565e533ed98c85d0fd2e031891f78d746f6c61ea51c1e5c56a1da6af4f488fc
+      ARTIFACT_NAME: hacom-holdings-ios-1.6.3-build35
+      IOS_APP_ID: "6784205119"
+      IOS_MARKETING_VERSION: "1.6.3"
+      IOS_BUILD_NUMBER: "35"
+
+    steps:
+      - name: Checkout the fixed public broker helpers
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: 1a268de01879dbd34047e22ce2beb83db936612e
+          persist-credentials: false
+
+      - name: Verify the fixed successful archive run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_json="$(gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN_ID")"
+          jq -e \
+            --arg broker_sha "$EXPECTED_BROKER_SHA" \
+            '.conclusion == "success" and
+             .event == "workflow_dispatch" and
+             .head_branch == "main" and
+             .head_sha == $broker_sha and
+             .path == ".github/workflows/ios-private-source-verify.yml" and
+             .run_attempt == 1' <<< "$run_json" >/dev/null
+
+      - name: Download and validate the fixed signed IPA artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source_dir="$RUNNER_TEMP/source-artifact"
+          mkdir -p "$source_dir"
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$SOURCE_REPO" \
+            --name "$ARTIFACT_NAME" \
+            --dir "$source_dir"
+
+          ipa_count="$(find "$source_dir" -type f -name '*.ipa' -print | wc -l | tr -d '[:space:]')"
+          test "$ipa_count" -eq 1
+          ipa_path="$(find "$source_dir" -type f -name '*.ipa' -print | head -n 1)"
+          test -s "$ipa_path"
+          validation_path="$source_dir/ios-release-validation.txt"
+          test -f "$validation_path"
+          grep -Fxq "MOBILE_SHA=$EXPECTED_MOBILE_SHA" "$validation_path"
+          grep -Fxq "MAIN_VERSION=$IOS_MARKETING_VERSION" "$validation_path"
+          grep -Fxq "MAIN_BUILD=$IOS_BUILD_NUMBER" "$validation_path"
+          grep -Fxq 'SIGNATURE_VALIDATION=PASS' "$validation_path"
+          test "$(grep -c '^IPA_SHA256=' "$validation_path")" -eq 1
+          expected_ipa_sha="$(sed -n 's/^IPA_SHA256=//p' "$validation_path")"
+          [[ "$expected_ipa_sha" =~ ^[0-9a-f]{64}$ ]]
+          test "$expected_ipa_sha" = "$EXPECTED_IPA_SHA256"
+          actual_ipa_sha="$(shasum -a 256 "$ipa_path" | cut -d ' ' -f 1)"
+          test "$actual_ipa_sha" = "$expected_ipa_sha"
+          echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
+
+      - name: Revalidate the upload candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work_dir="$RUNNER_TEMP/ipa-check"
+          mkdir -p "$work_dir"
+          unzip -q "$IPA_PATH" -d "$work_dir"
+          main_app_count="$(find "$work_dir/Payload" -type d -name '*.app' -print | wc -l | tr -d '[:space:]')"
+          test "$main_app_count" -eq 1
+          main_app="$(find "$work_dir/Payload" -type d -name '*.app' -print | head -n 1)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$main_app/Info.plist")" = 'com.hacom.chat'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$main_app/Info.plist")" = "$IOS_MARKETING_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$main_app/Info.plist")" = "$IOS_BUILD_NUMBER"
+          shareext_plist="$main_app/PlugIns/ShareExtension.appex/Info.plist"
+          test -f "$shareext_plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$shareext_plist")" = 'com.hacom.chat.share'
+          codesign --verify --deep --strict "$main_app"
+          codesign -d --verbose=4 "$main_app" 2>&1 | grep -q '^Authority=Apple Distribution:'
+
+      - name: Materialize the existing App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+          test -n "$ASC_PRIVATE_KEY"
+          key_dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$key_dir"
+          chmod 700 "$HOME/.appstoreconnect" "$key_dir"
+          key_path="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          test ! -e "$key_path"
+          trap 'rm -f -- "$key_path"' ERR INT TERM
+          echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+
+      - name: Check Apple build availability before upload
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node .github/scripts/audit-apple-signing-assets.mjs "$RUNNER_TEMP/apple-signing-before-upload.json"
+
+      - name: Upload the validated IPA to App Store Connect
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -s "$ASC_KEY_PATH"
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Clean up downloaded IPA and App Store Connect key
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -n "${ASC_KEY_PATH:-}" ]; then
+            rm -f -- "$ASC_KEY_PATH"
+          fi
+          rmdir "$HOME/.appstoreconnect/private_keys" 2>/dev/null || true
+          rmdir "$HOME/.appstoreconnect" 2>/dev/null || true
+          rm -rf -- "$RUNNER_TEMP/source-artifact" "$RUNNER_TEMP/ipa-check"
+          rm -f -- "$RUNNER_TEMP/apple-signing-before-upload.json"
