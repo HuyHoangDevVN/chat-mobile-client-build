@@ -30,7 +30,7 @@ const get = url => new Promise((resolve, reject) => {
     response.on('data', chunk => { body += chunk; });
     response.on('end', () => {
       if (response.statusCode !== 200) {
-        reject(new Error(`Apple signing inventory read failed with HTTP ${response.statusCode}`));
+        reject(new Error(`Apple App Store Connect GET failed with HTTP ${response.statusCode}`));
         return;
       }
       resolve(JSON.parse(body));
@@ -48,6 +48,37 @@ const readAll = async path => {
   }
   return items;
 };
+
+const buildInventoryInputs = [
+  process.env.IOS_APP_ID,
+  process.env.IOS_MARKETING_VERSION,
+  process.env.IOS_BUILD_NUMBER,
+];
+if (buildInventoryInputs.some(Boolean)) {
+  if (buildInventoryInputs.some(value => !value)) {
+    throw new Error('App Store Connect build inventory requires app ID, marketing version, and build number');
+  }
+  const query = new URLSearchParams({
+    'filter[app]': process.env.IOS_APP_ID,
+    'filter[version]': process.env.IOS_BUILD_NUMBER,
+    'filter[preReleaseVersion.version]': process.env.IOS_MARKETING_VERSION,
+    'filter[preReleaseVersion.platform]': 'IOS',
+    'fields[builds]': 'version,processingState,uploadedDate',
+    limit: '200',
+  });
+  const result = await get(`https://api.appstoreconnect.apple.com/v1/builds?${query}`);
+  if (!Array.isArray(result.data)) {
+    throw new Error('Apple App Store Connect build inventory response was invalid');
+  }
+  if (result.data.length > 0) {
+    throw new Error(
+      `iOS build collision: ${process.env.IOS_MARKETING_VERSION} (${process.env.IOS_BUILD_NUMBER}) already exists in App Store Connect`,
+    );
+  }
+  console.log(
+    `App Store Connect build number available: ${process.env.IOS_MARKETING_VERSION} (${process.env.IOS_BUILD_NUMBER})`,
+  );
+}
 
 const clean = value => String(value ?? '').replace(/[\t\r\n]+/g, ' ');
 const inventory = [
