@@ -4,26 +4,29 @@ on:
   workflow_dispatch:
     inputs:
       confirm_release:
-        description: 'Type BUILD_IOS_1_6_3_34 to build the signed iOS 1.6.3 (34) IPA.'
+        description: 'Type BUILD_IOS_1_6_3_35 to build the signed iOS 1.6.3 (35) IPA.'
         required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-1.6.3-build34
+  group: ios-1.6.3-build35
   cancel-in-progress: false
 
 jobs:
   archive:
-    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_34' }}
+    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_35' }}
     runs-on: macos-26
     timeout-minutes: 90
     environment: private-source-read
     env:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
-      EXPECTED_MOBILE_SHA: d57ae244966f5d5ef77c05c304eff5f6f3052d03
+      EXPECTED_MOBILE_SHA: 2c129a8f0549ab47968463ce93b1673a2fa68c6b
+      IOS_APP_ID: "6784205119"
+      IOS_MARKETING_VERSION: "1.6.3"
+      IOS_BUILD_NUMBER: "35"
       DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
@@ -108,6 +111,17 @@ jobs:
           npm --prefix "$shared" ci --no-audit --no-fund
           npm --prefix "$shared" run build
           cp "$mobile/.env.example" "$mobile/.env"
+          sed -i '' \
+            -e 's/^APP_ENV=development$/APP_ENV=production/' \
+            -e 's/^QR_LOGIN_MOBILE_ENABLED=false$/QR_LOGIN_MOBILE_ENABLED=true/' \
+            "$mobile/.env"
+          grep -Fxq 'APP_ENV=production' "$mobile/.env"
+          grep -Fxq 'API_BASE_URL=https://chat.hacomholdings.com.vn/api/v1' "$mobile/.env"
+          grep -Fxq 'AUTH_BASE_URL=https://chat.hacomholdings.com.vn/api/v1/auth' "$mobile/.env"
+          grep -Fxq 'WS_BASE_URL=wss://chat.hacomholdings.com.vn/ws' "$mobile/.env"
+          grep -Fxq 'QR_LOGIN_MOBILE_ENABLED=true' "$mobile/.env"
+          test "$(grep -c '^APP_ENV=' "$mobile/.env")" -eq 1
+          test "$(grep -c '^QR_LOGIN_MOBILE_ENABLED=' "$mobile/.env")" -eq 1
           npm --prefix "$mobile" ci --no-audit --no-fund
           npm --prefix "$mobile" run typecheck
           npm --prefix "$mobile" test -- --runInBand
@@ -135,7 +149,7 @@ jobs:
           echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
           echo "ASC_ISSUER_ID=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
 
-      - name: Read Apple signing inventory before archive
+      - name: Check Apple signing and build inventories before archive
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -263,7 +277,7 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
-      - name: Verify Apple signing inventory is unchanged
+      - name: Verify Apple inventory and build availability after archive
         if: always()
         shell: bash
         run: |
@@ -283,8 +297,8 @@ jobs:
           unzip -q "$IPA_PATH" -d "$RUNNER_TEMP/ipa-check"
           MAIN_APP="$(find "$RUNNER_TEMP/ipa-check/Payload" -type d -name '*.app' -print | head -n 1)"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$MAIN_APP/Info.plist")" = 'com.hacom.chat'
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MAIN_APP/Info.plist")" = '1.6.3'
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MAIN_APP/Info.plist")" = '34'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MAIN_APP/Info.plist")" = "$IOS_MARKETING_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$MAIN_APP/Info.plist")" = "$IOS_BUILD_NUMBER"
           SHAREEXT_PLIST="$MAIN_APP/PlugIns/ShareExtension.appex/Info.plist"
           test -f "$SHAREEXT_PLIST"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SHAREEXT_PLIST")" = 'com.hacom.chat.share'
@@ -297,8 +311,8 @@ jobs:
           IPA_SHA256="$(shasum -a 256 "$IPA_PATH" | cut -d ' ' -f 1)"
           {
             echo "MOBILE_SHA=$MOBILE_SHA"
-            echo 'MAIN_VERSION=1.6.3'
-            echo 'MAIN_BUILD=34'
+            echo "MAIN_VERSION=$IOS_MARKETING_VERSION"
+            echo "MAIN_BUILD=$IOS_BUILD_NUMBER"
             echo "IPA_SHA256=$IPA_SHA256"
             echo 'SIGNATURE_VALIDATION=PASS'
           } > "$RUNNER_TEMP/ios-release-validation.txt"
@@ -306,7 +320,7 @@ jobs:
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v6
         with:
-          name: hacom-holdings-ios-1.6.3-build34
+          name: hacom-holdings-ios-1.6.3-build35
           path: |
             ${{ runner.temp }}/export/*.ipa
             ${{ runner.temp }}/ios-release-validation.txt
