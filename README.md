@@ -16,7 +16,7 @@ after both controls pass:
    - https://docs.github.com/actions/reference/runners/github-hosted-runners
    - https://github.com/actions/create-github-app-token
 
-For iOS 1.6.3 build 35, the broker checks out the fixed private release and
+For iOS 1.6.3 build 36, the broker checks out the fixed private release and
 shared-types SHAs, runs source gates, signs and exports exactly one IPA,
 validates its bundle and signature, and retains it as a seven-day Actions
 artifact. The separate `ios-testflight-upload.yml` workflow is manual-only. It
