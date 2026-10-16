@@ -1,13 +1,13 @@
-name: iOS 1.6.3 build 36 TestFlight upload
+name: iOS 1.6.3 build 37 TestFlight upload
 
 on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: 'Validated public archive run ID for iOS 1.6.3 (36).'
+        description: 'Validated public archive run ID for iOS 1.6.3 (37).'
         required: true
       confirm_upload:
-        description: 'Type UPLOAD_TESTFLIGHT_IOS_1_6_3_36 to upload build 1.6.3 (36).'
+        description: 'Type UPLOAD_TESTFLIGHT_IOS_1_6_3_37 to upload build 1.6.3 (37).'
         required: true
 
 permissions:
@@ -15,34 +15,34 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-testflight-upload-1.6.3-build36
+  group: ios-testflight-upload-1.6.3-build37
   cancel-in-progress: false
 
 jobs:
   upload:
     if: >-
       ${{ github.ref_name == 'main' &&
-          inputs.source_run_id == '37875290474' &&
-          inputs.confirm_upload == 'UPLOAD_TESTFLIGHT_IOS_1_6_3_36' }}
+          inputs.source_run_id == '38873030292' &&
+          inputs.confirm_upload == 'UPLOAD_TESTFLIGHT_IOS_1_6_3_37' }}
     runs-on: macos-26
     timeout-minutes: 30
     environment: private-source-read
     env:
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       SOURCE_REPO: HuyHoangDevVN/chat-mobile-client-build
-      EXPECTED_BROKER_SHA: 8c0d0c315682cae4bae964b0e680ffce9e79e712
-      EXPECTED_MOBILE_SHA: 8301383b1b766d0fec632628563d0ca11c056d97
-      EXPECTED_IPA_SHA256: 6a4bc792d466e6cb01e47688a51a266b1fc1cba148bfa9957ebff2a945f1243d
-      ARTIFACT_NAME: hacom-holdings-ios-1.6.3-build36
+      EXPECTED_BROKER_SHA: a5f3c609f660dd60607e26442c40a35a03e4ed4f
+      EXPECTED_MOBILE_SHA: 74dcbefe3822ec3895418dad4642a8bf21efcf4a
+      EXPECTED_IPA_SHA256: 7385c73348dc42aa1f455648d4e6f5f7566af969b03188d184003906ded7ffca
+      ARTIFACT_NAME: hacom-holdings-ios-1.6.3-build37
       IOS_APP_ID: "6784205119"
       IOS_MARKETING_VERSION: "1.6.3"
-      IOS_BUILD_NUMBER: "36"
+      IOS_BUILD_NUMBER: "37"
 
     steps:
       - name: Checkout the fixed public broker helpers
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: 8c0d0c315682cae4bae964b0e680ffce9e79e712
+          ref: a5f3c609f660dd60607e26442c40a35a03e4ed4f
           persist-credentials: false
 
       - name: Verify the fixed successful archive run
