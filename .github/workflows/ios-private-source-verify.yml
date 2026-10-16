@@ -42,6 +42,7 @@ jobs:
         with:
           app-id: ${{ vars.MOBILE_BUILD_BROKER_APP_ID }}
           private-key: ${{ secrets.MOBILE_BUILD_BROKER_APP_KEY }}
+          permission-contents: read
           owner: hacom-holding-dx
           repositories: |
             chat-mobile-client
