@@ -4,30 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       confirm_release:
-        description: 'Type BUILD_IOS_1_6_3_36 to build the signed iOS 1.6.3 (36) IPA.'
+        description: 'Type BUILD_IOS_1_6_3_37 to build the signed iOS 1.6.3 (37) IPA.'
         required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-1.6.3-build36
+  group: ios-1.6.3-build37
   cancel-in-progress: false
 
 jobs:
   archive:
-    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_36' }}
+    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_3_37' }}
     runs-on: macos-26
     timeout-minutes: 90
     environment: private-source-read
     env:
       MOBILE_REF: release/ios/1.6.3
       SHARED_TYPES_REF: main
-      EXPECTED_MOBILE_SHA: 8301383b1b766d0fec632628563d0ca11c056d97
-      EXPECTED_SHARED_TYPES_SHA: 4271100be76fb0edd60d239da4569cae1814928b
+      EXPECTED_MOBILE_SHA: 74dcbefe3822ec3895418dad4642a8bf21efcf4a
+      EXPECTED_SHARED_TYPES_SHA: c0a06681b2feb26b78b31823a6c0e64b4a1dcdce
       IOS_APP_ID: "6784205119"
       IOS_MARKETING_VERSION: "1.6.3"
-      IOS_BUILD_NUMBER: "36"
+      IOS_BUILD_NUMBER: "37"
       DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
@@ -42,6 +42,7 @@ jobs:
         with:
           app-id: ${{ vars.MOBILE_BUILD_BROKER_APP_ID }}
           private-key: ${{ secrets.MOBILE_BUILD_BROKER_APP_KEY }}
+          permission-contents: read
           owner: hacom-holding-dx
           repositories: |
             chat-mobile-client
@@ -325,7 +326,7 @@ jobs:
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v6
         with:
-          name: hacom-holdings-ios-1.6.3-build36
+          name: hacom-holdings-ios-1.6.3-build37
           path: |
             ${{ runner.temp }}/export/*.ipa
             ${{ runner.temp }}/ios-release-validation.txt
