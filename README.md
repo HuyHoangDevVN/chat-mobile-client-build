@@ -51,6 +51,8 @@ The archive workflow pins the approved release revision and the existing
 shared-types snapshot. Preparation does not dispatch an archive or upload.
 App Store Connect build availability must pass the existing pre-archive gate.
 
-The upload-only workflow remains pinned to the previous validated IPA.
-Update its immutable archive/artifact/checksum pins only after build 39 has
-been archived and validated; never rebuild an IPA just to retry an upload.
+The upload-only workflow now pins successful archive [40998329606](https://github.com/HuyHoangDevVN/chat-mobile-client-build/actions/runs/40998329606),
+broker revision `027b2f9c0a44400aa693d6bb974796f27c557a99`, and the validated
+build 39 IPA checksum `615efafb6042ceb49b3f127be760654b19cd47f47c7c39fce38e1bb244a35d08`.
+Local checksum and both app/ShareExtension version metadata match the archive
+manifest. Upload reuses this artifact; never rebuild an IPA just to retry it.
