@@ -16,7 +16,7 @@ after both controls pass:
    - https://docs.github.com/actions/reference/runners/github-hosted-runners
    - https://github.com/actions/create-github-app-token
 
-For iOS 1.6.4 build 38, the broker checks out the fixed private release and
+For the prepared iOS 1.6.5 build 39 archive, the broker checks out the fixed private release and
 shared-types SHAs, runs source gates, signs and exports exactly one IPA,
 validates its bundle and signature, and retains it as a seven-day Actions
 artifact. The separate `ios-testflight-upload.yml` workflow is manual-only. It
@@ -44,3 +44,13 @@ Required signing secret names are `IOS_DISTRIBUTION_P12_BASE64`,
 `IOS_DISTRIBUTION_P12_PASSWORD`, `IOS_APP_STORE_PROFILE_BASE64`, and
 `IOS_SHARE_EXTENSION_PROFILE_BASE64`.
 
+
+## iOS 1.6.5 (39) preparation
+
+The archive workflow pins the approved release revision and the existing
+shared-types snapshot. Preparation does not dispatch an archive or upload.
+App Store Connect build availability must pass the existing pre-archive gate.
+
+The upload-only workflow remains pinned to the previous validated IPA.
+Update its immutable archive/artifact/checksum pins only after build 39 has
+been archived and validated; never rebuild an IPA just to retry an upload.
