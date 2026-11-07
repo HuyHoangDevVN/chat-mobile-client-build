@@ -56,3 +56,7 @@ broker revision `027b2f9c0a44400aa693d6bb974796f27c557a99`, and the validated
 build 39 IPA checksum `615efafb6042ceb49b3f127be760654b19cd47f47c7c39fce38e1bb244a35d08`.
 Local checksum and both app/ShareExtension version metadata match the archive
 manifest. Upload reuses this artifact; never rebuild an IPA just to retry it.
+
+## iOS 1.6.8 (40) preparation
+
+The archive workflow pins approved mobile revision `7f597a1b560667a526b21f5a8e8778699b86d004` and shared-types revision `510267075dcfb948bb34684374c836df33ddd074`. It uses the existing protected Environment, read-only GitHub App, manual signing and unconditional cleanup. No private application source is committed here. The upload workflow remains pinned to build 39 until a validated build 40 artifact exists.
