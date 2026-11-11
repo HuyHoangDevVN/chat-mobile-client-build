@@ -4,30 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       confirm_release:
-        description: 'Type BUILD_IOS_1_6_9_42 to build the signed iOS 1.6.9 (42) IPA.'
+        description: 'Type BUILD_IOS_1_6_9_43 to build the signed iOS 1.6.9 (43) IPA.'
         required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-1.6.9-build42
+  group: ios-1.6.9-build43
   cancel-in-progress: false
 
 jobs:
   archive:
-    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_9_42' }}
+    if: ${{ inputs.confirm_release == 'BUILD_IOS_1_6_9_43' }}
     runs-on: macos-26
     timeout-minutes: 90
     environment: private-source-read
     env:
       MOBILE_REF: release/ios/1.6.9
       SHARED_TYPES_REF: main
-      EXPECTED_MOBILE_SHA: 1468c66632bd986d18df61eb4ce6cb90a740430b
+      EXPECTED_MOBILE_SHA: 065cac40fd45d09218e8a8ac6b35e9f62f693fb5
       EXPECTED_SHARED_TYPES_SHA: 510267075dcfb948bb34684374c836df33ddd074
       IOS_APP_ID: "6784205119"
       IOS_MARKETING_VERSION: "1.6.9"
-      IOS_BUILD_NUMBER: "42"
+      IOS_BUILD_NUMBER: "43"
       DEVELOPMENT_TEAM: 5522X6YM63
 
     steps:
@@ -324,7 +324,7 @@ jobs:
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v6
         with:
-          name: hacom-holdings-ios-1.6.9-build42
+          name: hacom-holdings-ios-1.6.9-build43
           path: |
             ${{ runner.temp }}/export/*.ipa
             ${{ runner.temp }}/ios-release-validation.txt
