@@ -1,13 +1,13 @@
-name: iOS 1.6.9 build 43 TestFlight upload
+name: iOS 1.6.9 build 44 TestFlight upload
 
 on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: 'Validated public archive run ID for iOS 1.6.9 (43).'
+        description: 'Validated public archive run ID for iOS 1.6.9 (44).'
         required: true
       confirm_upload:
-        description: 'Type UPLOAD_TESTFLIGHT_IOS_1_6_9_43 to upload build 1.6.9 (43).'
+        description: 'Type UPLOAD_TESTFLIGHT_IOS_1_6_9_44 to upload build 1.6.9 (44).'
         required: true
 
 permissions:
@@ -15,28 +15,28 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-testflight-upload-1.6.9-build43
+  group: ios-testflight-upload-1.6.9-build44
   cancel-in-progress: false
 
 jobs:
   upload:
     if: >-
       ${{ github.ref_name == 'main' &&
-          inputs.source_run_id == '42974508029' &&
-          inputs.confirm_upload == 'UPLOAD_TESTFLIGHT_IOS_1_6_9_43' }}
+          inputs.source_run_id == '43149797542' &&
+          inputs.confirm_upload == 'UPLOAD_TESTFLIGHT_IOS_1_6_9_44' }}
     runs-on: macos-26
     timeout-minutes: 30
     environment: private-source-read
     env:
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       SOURCE_REPO: HuyHoangDevVN/chat-mobile-client-build
-      EXPECTED_BROKER_SHA: b4893bdf616f577bc9c9e12b5342ea6879a49481
-      EXPECTED_MOBILE_SHA: 065cac40fd45d09218e8a8ac6b35e9f62f693fb5
-      EXPECTED_IPA_SHA256: e6787ae5b277b237d871b517c8bcc17c137b4e9fa693b6fe40e91666e98a62d6
-      ARTIFACT_NAME: hacom-holdings-ios-1.6.9-build43
+      EXPECTED_BROKER_SHA: e5551ebb00722f1657ad4271028b83d20ba76ec5
+      EXPECTED_MOBILE_SHA: 47cb5b582990e99d0ae215166191fb728c330cc6
+      EXPECTED_IPA_SHA256: 5c524a367d21d960e44a5b05917ee819245cbd03d3403b748ab30906f2b047b8
+      ARTIFACT_NAME: hacom-holdings-ios-1.6.9-build44
       IOS_APP_ID: "6784205119"
       IOS_MARKETING_VERSION: "1.6.9"
-      IOS_BUILD_NUMBER: "43"
+      IOS_BUILD_NUMBER: "44"
 
     steps:
       - name: Checkout the fixed public broker helpers
